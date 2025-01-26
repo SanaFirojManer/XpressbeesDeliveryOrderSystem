@@ -1,6 +1,8 @@
 package com.dev.sana.xpressbees.delivery.delivery_order_system.serviceImpl;
 
 import com.dev.sana.xpressbees.delivery.delivery_order_system.DeliveryOrderSystemApplication;
+import com.dev.sana.xpressbees.delivery.delivery_order_system.exception.OrderNotFoundExceptio;
+import com.dev.sana.xpressbees.delivery.delivery_order_system.exception.OrderProcessingException;
 import com.dev.sana.xpressbees.delivery.delivery_order_system.repository.DeliveryOrderRepository;
 import jakarta.transaction.Transactional;
 import com.dev.sana.xpressbees.delivery.delivery_order_system.model.DeliveryOrder;
@@ -16,53 +18,6 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-//@Service
-//public class DeliveryOrderServiceImpl implements DeliveryOrderService {
-//    @Autowired
-//    private DeliveryOrderRepository orderRepository;
-//
-//    @Override
-//    public DeliveryOrder addOrder(DeliveryOrder order) {
-//        order.setDeliveryStatus(DeliveryStatus.PENDING);
-//        order.setCreatedAt(java.time.LocalDateTime.now());
-//        return orderRepository.save(order);
-//    }
-//
-//    @Override
-//    public List<DeliveryOrder> fetchOrdersByStatus(DeliveryStatus status, int page, int size) {
-//        Pageable pageable = PageRequest.of(page, size);
-//        Page<DeliveryOrder> orders = orderRepository.findByDeliveryStatus(status, pageable);
-//        System.out.println("Fetched Orders: " + orders.getContent());
-//        return orders.getContent();
-//    }
-//
-//    @Override
-//    public List<Object[]> getTop3Customers() {
-//        return orderRepository.findTop3CustomersByDeliveredOrders(PageRequest.of(0, 3));
-//    }
-//
-//    @Override
-//    public List<Object[]> getOrderStatusCounts() {
-//        return orderRepository.findOrderStatusCounts();
-//    }
-//
-//    @Override
-//    @Transactional
-//    public void processOrder(DeliveryOrder order) {
-//        order.setDeliveryStatus(DeliveryStatus.IN_PROGRESS);
-//        orderRepository.save(order);
-//
-//        try {
-//            Thread.sleep(5000); // Simulate delivery time
-//        } catch (InterruptedException e) {
-//            Thread.currentThread().interrupt();
-//            return;
-//        }
-//
-//        order.setDeliveryStatus(DeliveryStatus.DELIVERED);
-//        orderRepository.save(order);
-//    }
-//}
 @Service
 public class DeliveryOrderServiceImpl implements DeliveryOrderService {
     @Autowired
@@ -74,24 +29,40 @@ public class DeliveryOrderServiceImpl implements DeliveryOrderService {
     public DeliveryOrder addOrder(DeliveryOrder order) {
         order.setDeliveryStatus(DeliveryStatus.PENDING);
         order.setCreatedAt(java.time.LocalDateTime.now());
-        return orderRepository.save(order);
+        try {
+            return orderRepository.save(order);
+        } catch (Exception e){
+            throw new OrderProcessingException("Error while saving the order");
+        }
+
     }
 
     @Override
     public List<DeliveryOrder> fetchOrdersByStatus(DeliveryStatus status, int page, int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<DeliveryOrder> orders = orderRepository.findByDeliveryStatus(status, pageable);
+        if (orders.isEmpty()) {
+            throw new OrderNotFoundExceptio("No orders found with status");
+        }
         return orders.getContent();
     }
 
     @Override
     public List<Object[]> getTop3Customers() {
-        return orderRepository.findTop3CustomersByDeliveredOrders(PageRequest.of(0, 3));
+        try {
+            return orderRepository.findTop3CustomersByDeliveredOrders(PageRequest.of(0, 3));
+        } catch (Exception e){
+            throw new OrderProcessingException("Error fetching top 3 customers");
+        }
     }
 
     @Override
     public List<Object[]> getOrderStatusCounts() {
-        return orderRepository.findOrderStatusCounts();
+        try {
+            return orderRepository.findOrderStatusCounts();
+        } catch (Exception e){
+            throw new OrderProcessingException("Error fetching order status counts");
+        }
     }
 
     @Override
@@ -99,7 +70,9 @@ public class DeliveryOrderServiceImpl implements DeliveryOrderService {
     public void processOrder(DeliveryOrder order) {
         // Lock the order using pessimistic write lock
         order = orderRepository.findPendingOrdersForUpdate(DeliveryStatus.PENDING).stream().findFirst().orElse(null);
-
+        if (order == null) {
+            throw new OrderNotFoundExceptio("Order with PENDING status not found for processing.");
+        }
         if (order != null) {
             order.setDeliveryStatus(DeliveryStatus.IN_PROGRESS);
             orderRepository.save(order);
@@ -117,6 +90,7 @@ public class DeliveryOrderServiceImpl implements DeliveryOrderService {
                     orderRepository.save(orderToProcess);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                    throw new OrderProcessingException("Error while processing the order.");
                 }
             });
         }
